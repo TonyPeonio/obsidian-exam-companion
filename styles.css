@@ -1,0 +1,19 @@
+/* Exam Companion */
+
+.exam-modal .exam-modal-help {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: 0 0 var(--size-4-3);
+}
+
+.exam-modal .exam-modal-error {
+	color: var(--text-error);
+	font-size: var(--font-ui-small);
+	margin: var(--size-4-2) 0 0;
+}
+
+.exam-settings-textarea {
+	width: 100%;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+}

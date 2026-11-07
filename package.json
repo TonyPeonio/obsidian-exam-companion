@@ -1,0 +1,34 @@
+{
+  "name": "exam-companion",
+  "version": "0.1.0",
+  "description": "Turn a course folder and an exam date into a day-by-day study plan, daily quizzes from your own notes with a local model, and flashcards.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && eslint . && node esbuild.config.mjs production",
+    "test": "vitest run",
+    "version": "node version-bump.mjs && git add manifest.json versions.json",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "obsidian",
+    "exam",
+    "study",
+    "quiz",
+    "flashcards",
+    "ollama"
+  ],
+  "author": "Tony Peonio",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.25.12",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.5.0",
+    "obsidian": "^1.14.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}
