@@ -5,8 +5,18 @@ it writes a **day-by-day study plan** from your own notes, asks you a **daily qu
 local model (via [Ollama](https://ollama.com)) from those notes, and turns the questions into
 **flashcards**. Everything runs on your machine; nothing leaves it.
 
+Exam Companion is one of a set of Obsidian plugins by the same author, all local and all at
+[github.com/TonyPeonio](https://github.com/TonyPeonio):
+[Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent) (search, compile and
+edit notes with a local Ollama agent), [Lecture Companion](https://github.com/TonyPeonio/obsidian-lecture-companion)
+(record lectures with local transcription and summarize them into course notes),
+[Canvas Companion](https://github.com/TonyPeonio/obsidian-canvas-companion) (Canvas LMS assignments,
+due dates and grades as notes) and [Paper Companion](https://github.com/TonyPeonio/obsidian-paper-companion)
+(Zotero search, literature notes and page-cited reading notes with a local model). Each works on
+its own; Exam Companion reads Lecture Companion's course notes as they are.
+
 - **A plan from your notes, not a template.** Every `## section` of the notes in the course folder
-  is a topic, weighted by how much you wrote. Each topic gets a first pass and a review three to
+  is a topic, weighted by how much you wrote (a Lecture Companion lecture note is one topic). Each topic gets a first pass and a review three to
   five days later; the last two days are mixed review of the weakest and heaviest topics. Minutes
   per day are respected. The plan is an ordinary checklist note you can edit.
 - **Daily quiz from the notes themselves.** Today's topics are sent to the local model with their
@@ -17,11 +27,12 @@ local model (via [Ollama](https://ollama.com)) from those notes, and turns the q
   topic weak, and the remaining days get extra review for it. Days that have passed are never
   rewritten.
 - **Flashcards.** `Question::Answer` lines in the format the
-  [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin reads.
-- Pairs with [Lecture Companion](https://github.com/TonyPeonio/obsidian-lecture-companion), whose
-  course notes (`## YYYY-MM-DD` per lecture with a `### Summary`) are read as they are, and with
-  [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent) for questions across
-  the whole vault.
+  [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin reads, in a
+  note tagged `#flashcards/<Course>` so that plugin shows them as a deck.
+- Pairs with [Lecture Companion](https://github.com/TonyPeonio/obsidian-lecture-companion): its
+  lecture notes (`## Summary`, `## Transcript`, `## My notes`) are one topic each, quizzed from the
+  Summary; its other layout (`## YYYY-MM-DD` sections with a `### Summary`) is one topic per
+  section.
 - Free and open source, MIT licensed. No accounts, no API keys, no telemetry.
 
 ## Requirements
@@ -40,7 +51,9 @@ local model (via [Ollama](https://ollama.com)) from those notes, and turns the q
    `## Quiz YYYY-MM-DD`; open the answer callouts to check yourself and tick what you got right.
 3. Run **Record quiz results**: wrong answers make their topics weak, and the plan from today
    onward is rebuilt with extra review for them.
-4. **Export flashcards** writes every quiz question to `Flashcards/<Course>.md`.
+4. **Export flashcards** writes every quiz question to `Flashcards/<Course>.md`, tagged for the
+   Spaced Repetition plugin. Running it again adds only new questions; cards you have already
+   reviewed keep their scheduling.
 
 ### Commands
 
@@ -54,17 +67,21 @@ local model (via [Ollama](https://ollama.com)) from those notes, and turns the q
 ### How it works
 
 **Topics.** For each note in the course folder, every `## heading` section is one topic; a `### Summary`
-under it (Lecture Companion's layout) is used as the quiz text, the whole section's word count as
-the weight. A dated section with a `**Topic:** …` line is titled by that line. Notes without
-`##` headings are one topic each. Topics are ordered by date when one is found in the heading,
-the file name or a `date:` property.
+under it is used as the quiz text, the whole section's word count as the weight. A dated section
+with a `**Topic:** …` line is titled by that line. A Lecture Companion lecture note (`## Slides`,
+`## Summary`, `## Transcript`, `## My notes`) is one topic titled by its `title` property and date,
+quizzed from the Summary and weighted by the whole note. Notes without `##` headings are one topic
+each. Topics are ordered by date when one is found in the heading, the file name or a `date:`
+property.
 
-**Schedule.** Days run from the start date to the day before the exam. Half the total time goes to
-first passes, split in proportion to topic weight (10 minutes minimum, one day's budget maximum);
-a topic that does not fit the remaining minutes of a day moves to the next. Each topic is reviewed
-at half its first-pass time three to five days later (or in the final days when the runway is
-short). Weak topics get one more review as early as there is room and come first in the final
-mixed review. The result is deterministic for the same notes and inputs.
+**Schedule.** Days run from the start date to the day before the exam (the exam date must be a
+real calendar day after today). Half the total time goes to first passes, split in proportion to
+topic weight (10 minutes minimum, one day's budget maximum); a topic that does not fit the
+remaining minutes of a day moves to the next, and when the runway is too short for everything
+the overflow is spread over the least loaded days. Each topic is reviewed at half its first-pass
+time three to five days later (or in the final days when the runway is short). Weak topics get
+one more review as early as there is room and come first in the final mixed review. Weekends are
+ordinary days. The result is deterministic for the same notes and inputs.
 
 **Plan note.** Frontmatter holds `exam`, `date`, `course_folder`, `minutes_per_day` and
 `weak_topics`; `## Plan` has one `### YYYY-MM-DD (Day)` section per day with task lines
@@ -74,9 +91,12 @@ sections are appended after that. *Record quiz results* rewrites only `## Plan` 
 **Quiz.** The system prompt asks for exactly N `Q:` / `A:` pairs supported by the given text, in
 explain/compare/compute style; the user message carries today's topics' text, trimmed to the
 context window (3.2 characters per token, 1,500 tokens reserved for the reply). The parser accepts
-numbering, bold labels and "Question/Answer"; questions are attached to the topic they mention,
-else in turn. Each question is a checkbox followed by a collapsed `[!answer]` callout and its source
-link.
+numbering, bold labels, "Question/Answer", Q and A on one line, code in answers, and ignores
+headings and closing remarks; if the model writes more pairs than asked, the first N are kept.
+Questions are attached to the topic they mention, else in turn. Each question is a checkbox
+followed by a collapsed `[!answer]` callout and its source link. `npm run quiz:live` runs this
+path against a real Ollama model with three lecture notes and checks the questions (see
+`scripts/quiz-live.ts`).
 
 ## Settings worth knowing
 
@@ -84,6 +104,9 @@ link.
   if quizzes say the text was trimmed.
 - **Thinking mode** — off by default; quizzes are short and many.
 - **Questions per quiz**, **default minutes per day**, **exams folder**, **flashcards folder**.
+- **Flashcards tag** — `flashcards` by default. A new flashcards note starts with
+  `#flashcards/<Course>`, which is what the Spaced Repetition plugin scans for (and names the
+  deck). Change it if you changed the tag in that plugin's settings.
 
 ## Privacy and network use
 
