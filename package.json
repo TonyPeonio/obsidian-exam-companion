@@ -1,6 +1,6 @@
 {
   "name": "exam-companion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn a course folder and an exam date into a day-by-day study plan, daily quizzes from your own notes with a local model, and flashcards.",
   "main": "main.js",
   "private": true,

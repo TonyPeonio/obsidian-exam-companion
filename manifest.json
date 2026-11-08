@@ -1,7 +1,7 @@
 {
 	"id": "exam-companion",
 	"name": "Exam Companion",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"minAppVersion": "1.7.2",
 	"description": "Turn a course folder and an exam date into a day-by-day study plan, daily quizzes from your own notes with a local model, and flashcards.",
 	"author": "Tony Peonio",
