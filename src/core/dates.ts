@@ -3,8 +3,11 @@
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/** `YYYY-MM-DD` naming a real calendar day (2026-02-30 is not one). */
 export function isIsoDate(s: string): boolean {
-	return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+	const ms = toMs(s);
+	return !Number.isNaN(ms) && fromMs(ms) === s;
 }
 
 function toMs(date: string): number {

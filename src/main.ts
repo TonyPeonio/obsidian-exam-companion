@@ -144,7 +144,8 @@ export default class ExamCompanionPlugin extends Plugin {
 		const rebuilt = rebuildPlan(withWeak, today());
 		if (rebuilt !== content) await this.app.vault.modify(file, rebuilt);
 		const right = results.filter((r) => r.correct).length;
-		new Notice(`${right}/${results.length} right.${weak.length ? ` Weak topics added: ${weak.join(", ")}. Plan rebuilt from today.` : " No weak topics; plan unchanged."}`, 8000);
+		const outcome = !weak.length ? " No weak topics; plan unchanged." : rebuilt !== withWeak ? ` Weak topics added: ${weak.join(", ")}. Plan rebuilt from today.` : ` Weak topics added: ${weak.join(", ")}. No study days left to rebuild.`;
+		new Notice(`${right}/${results.length} right.${outcome}`, 8000);
 	}
 
 	async exportFlashcards(file: TFile): Promise<void> {

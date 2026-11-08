@@ -58,11 +58,14 @@ function minutesFor(topic: Topic, totalWords: number, budget: number, cap: numbe
 	return Math.max(MIN_SLOT, Math.min(cap, Math.round(share * budget)));
 }
 
-/** Puts `item` on the first day from `fromIndex` with room, else the least loaded one in range. */
+/**
+ * Puts `item` on the first day from `fromIndex` with room; when the range is full, on the
+ * first later day with room; when every day is full, on the least loaded one in range.
+ */
 function place(days: Budget[], fromIndex: number, toIndex: number, item: PlanItem): void {
 	const lo = Math.max(0, Math.min(fromIndex, days.length - 1));
 	const hi = Math.max(lo, Math.min(toIndex, days.length - 1));
-	for (let i = lo; i <= hi; i++) {
+	for (let i = lo; i < days.length; i++) {
 		if (days[i].left >= item.minutes) {
 			days[i].items.push(item);
 			days[i].left -= item.minutes;
@@ -103,6 +106,9 @@ export function buildSchedule(topics: Topic[], start: string, examDate: string, 
 
 	const toLearn = topics.filter((t) => !learned.has(t.id));
 	const totalWords = toLearn.reduce((n, t) => n + t.words, 0);
+	// Review slots are shares of all topics, so a rebuild with nothing left to learn does not
+	// turn every review into half a day.
+	const allWords = topics.reduce((n, t) => n + t.words, 0);
 	// Half the study time goes to first passes, the rest to reviews and slack.
 	const learnBudget = Math.max(studyDays.length, 1) * cap * 0.5;
 	const learnedOn = new Map<string, number>();
@@ -111,28 +117,34 @@ export function buildSchedule(topics: Topic[], start: string, examDate: string, 
 		const minutes = minutesFor(t, totalWords, learnBudget, cap);
 		const item: PlanItem = { topicId: t.id, title: t.title, minutes, kind: "learn", link: topicLink(t), done: false };
 		const target = studyDays.length ? studyDays : days;
-		// Fill days in order; a topic that does not fit moves to the next day.
+		// Fill days in order; a topic that does not fit moves to the next day. When the runway is
+		// too short for everything, the overflow goes to the least loaded day instead of piling
+		// onto the last one.
 		while (cursor < target.length - 1 && target[cursor].left < minutes && target[cursor].items.length > 0) cursor++;
-		target[cursor].items.push(item);
-		target[cursor].left -= minutes;
-		learnedOn.set(t.id, cursor);
+		let at = cursor;
+		if (target[at].left < minutes && target[at].items.length > 0) {
+			for (let i = 0; i < target.length; i++) if (target[i].left > target[at].left) at = i;
+		}
+		target[at].items.push(item);
+		target[at].left -= minutes;
+		learnedOn.set(t.id, at);
 	}
 	// Reviews: 3–5 days after the first pass; topics learned before this plan get one early.
 	for (const t of topics) {
 		if (reviewed.has(t.id)) continue;
 		const base = learnedOn.get(t.id);
-		const minutes = Math.max(MIN_SLOT, Math.round(minutesFor(t, totalWords || t.words, learnBudget, cap) / 2));
+		const minutes = Math.max(MIN_SLOT, Math.round(minutesFor(t, allWords, learnBudget, cap) / 2));
 		const item: PlanItem = { topicId: t.id, title: t.title, minutes, kind: "review", link: topicLink(t), done: false };
 		const target = studyDays.length ? studyDays : days;
 		if (base === undefined) place(target, 0, Math.min(2, target.length - 1), item);
 		else if (base + REVIEW_GAP[0] <= target.length - 1) place(target, base + REVIEW_GAP[0], base + REVIEW_GAP[2], item);
 		else if (finalDays.length) place(finalDays, 0, finalDays.length - 1, item);
-		else place(target, base, target.length - 1, item);
+		else place(target, Math.min(base + 1, target.length - 1), target.length - 1, item);
 	}
 	// Weak topics get one more review as soon as there is room.
 	for (const t of topics) {
 		if (!weak.has(t.id) && !weak.has(t.title)) continue;
-		const minutes = Math.max(MIN_SLOT, Math.round(minutesFor(t, totalWords || t.words, learnBudget, cap) / 2));
+		const minutes = Math.max(MIN_SLOT, Math.round(minutesFor(t, allWords, learnBudget, cap) / 2));
 		const item: PlanItem = { topicId: t.id, title: `${t.title}`, minutes, kind: "review", link: topicLink(t), done: false };
 		const target = studyDays.length ? studyDays : days;
 		place(target, 0, target.length - 1, item);
@@ -210,9 +222,16 @@ const TOPIC_RE = /^- (.+?) \((\d+) words\) — (\[\[[^\]]+\]\])\s*$/;
 /** The topic id a link denotes: the path with `.md` plus `#heading`. */
 export function topicIdFromLink(link: string): string {
 	const inner = link.replace(/^\[\[|\]\]$/g, "");
-	const [path, heading] = inner.split("#");
-	const withExt = /\.md$/i.test(path) ? path : `${path}.md`;
+	const { note, heading } = splitTopicId(inner);
+	const withExt = /\.md$/i.test(note) ? note : `${note}.md`;
 	return heading ? `${withExt}#${heading}` : withExt;
+}
+
+/** Splits at the first `#` only, so a heading such as `C# basics` survives. */
+export function splitTopicId(id: string): { note: string; heading?: string } {
+	const idx = id.indexOf("#");
+	if (idx < 0) return { note: id };
+	return { note: id.slice(0, idx), heading: id.slice(idx + 1) || undefined };
 }
 
 /** Splits a body into `## ` sections, keeping text before the first heading under "". */
@@ -270,7 +289,7 @@ export function parsePlanNote(content: string): Plan {
 		const m = TOPIC_RE.exec(line);
 		if (!m) continue;
 		const id = topicIdFromLink(m[3]);
-		const [note, heading] = id.split("#");
+		const { note, heading } = splitTopicId(id);
 		topics.push({ id, title: m[1], note, heading, text: "", words: Number(m[2]) });
 	}
 	return {

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { addDays, dateRange, daysBetween, isIsoDate, weekday } from "../src/core/dates";
 import { createPlan, validateRequest } from "../src/core/exam";
 import { parseFrontmatter, renderFrontmatter } from "../src/core/frontmatter";
-import { MIN_SLOT, PlanError, addWeakTopics, buildSchedule, parsePlanNote, planNoteName, rebuildPlan, renderPlanNote, topicIdFromLink } from "../src/core/planner";
+import { MIN_SLOT, PlanError, addWeakTopics, buildSchedule, itemsOn, parsePlanNote, planNoteName, rebuildPlan, renderPlanNote, topicIdFromLink, type Plan } from "../src/core/planner";
+import { attachTopics, latestQuiz, quizTopicsFor, renderQuizSection, weakTopicTitles } from "../src/core/quiz";
 import type { Topic } from "../src/core/topics";
 import { lectureVault } from "./fakes";
 
@@ -16,7 +17,11 @@ describe("dates", () => {
 		expect(dateRange("2026-11-08", "2026-11-10")).toEqual(["2026-11-08", "2026-11-09", "2026-11-10"]);
 		expect(dateRange("2026-11-10", "2026-11-09")).toEqual([]);
 		expect(weekday("2026-11-08")).toBe("Sun");
-		expect(isIsoDate("2026-02-30")).toBe(true); // calendar validity is not checked, only the shape
+		expect(isIsoDate("2026-02-28")).toBe(true);
+		expect(isIsoDate("2028-02-29")).toBe(true);
+		expect(isIsoDate("2026-02-30")).toBe(false);
+		expect(isIsoDate("2026-02-29")).toBe(false);
+		expect(isIsoDate("2026-13-01")).toBe(false);
 		expect(isIsoDate("8 Nov")).toBe(false);
 	});
 });
@@ -74,6 +79,44 @@ describe("buildSchedule", () => {
 		expect(() => buildSchedule([], "2026-11-08", "2026-11-20", 45)).toThrow(/No topics/);
 	});
 
+	it("spreads first passes over the study days when the runway is too short for everything", () => {
+		const many = Array.from({ length: 30 }, (_, i) => topic(i + 1, 100 + (i % 5) * 50));
+		const days = buildSchedule(many, "2026-11-08", "2026-11-13", 45);
+		expect(days).toHaveLength(5);
+		const learnPerDay = days.map((d) => d.items.filter((i) => i.kind === "learn").length);
+		expect(learnPerDay.reduce((n, c) => n + c, 0)).toBe(30);
+		// Three study days, ten first passes each, not 2 + 2 + 26.
+		expect(learnPerDay.slice(0, 3)).toEqual([10, 10, 10]);
+		expect(learnPerDay.slice(3)).toEqual([0, 0]);
+		for (const t of many) expect(days.flatMap((d) => d.items).some((i) => i.topicId === t.id && i.kind === "learn")).toBe(true);
+	});
+
+	it("keeps reviews proportional and within budget when everything is already learned", () => {
+		const days = buildSchedule(topics, "2026-11-12", "2026-11-22", 45, { learned: new Set(topics.map((t) => t.id)) });
+		const reviews = days.flatMap((d) => d.items).filter((i) => i.kind === "review");
+		expect(reviews.map((r) => r.topicId).sort()).toEqual(topics.map((t) => t.id).sort());
+		const minutesOf = (id: string) => reviews.find((r) => r.topicId === id)!.minutes;
+		// The 400-word topic gets a longer review than the 50-word one; none is half a day.
+		expect(minutesOf(topics[0].id)).toBeGreaterThan(minutesOf(topics[4].id));
+		expect(Math.max(...reviews.map((r) => r.minutes))).toBeLessThan(45 / 2 + 1);
+		for (const d of days) expect(d.items.reduce((n, i) => n + i.minutes, 0)).toBeLessThanOrEqual(45);
+		// Early reviews spill forward instead of overloading the first three days.
+		expect(days.slice(0, 2).every((d) => d.items.length > 0)).toBe(true);
+	});
+
+	it("works for a folder with a single note and for one day before the exam", () => {
+		const one = buildSchedule([topic(1, 120)], "2026-11-08", "2026-11-15", 30);
+		const all = one.flatMap((d) => d.items);
+		expect(all.filter((i) => i.kind === "learn")).toHaveLength(1);
+		expect(all.filter((i) => i.kind === "review")).toHaveLength(1);
+		expect(all.filter((i) => i.kind === "final")).toHaveLength(2);
+		for (const d of one) expect(d.items.reduce((n, i) => n + i.minutes, 0)).toBeLessThanOrEqual(30);
+		const lastMinute = buildSchedule(topics, "2026-11-08", "2026-11-09", 45);
+		expect(lastMinute).toHaveLength(1);
+		expect(lastMinute[0].items.filter((i) => i.kind === "learn")).toHaveLength(5);
+		expect(lastMinute[0].items.filter((i) => i.kind === "final")).toHaveLength(0);
+	});
+
 	it("skips first passes for topics already learned and puts weak topics first in the final days", () => {
 		const days = buildSchedule(topics, "2026-11-12", "2026-11-22", 45, { learned: new Set([topics[0].id, topics[1].id]), reviewed: new Set([topics[0].id]), weakTopics: ["Topic 5"] });
 		const all = days.flatMap((d) => d.items);
@@ -107,12 +150,26 @@ describe("plan note", () => {
 		expect(topicIdFromLink("[[Courses/Y]]")).toBe("Courses/Y.md");
 	});
 
+	it("round-trips a heading that itself contains #", () => {
+		expect(topicIdFromLink("[[Courses/Langs#C# basics]]")).toBe("Courses/Langs.md#C# basics");
+		const t: Topic = { id: "Courses/Langs.md#C# basics", title: "C# basics", note: "Courses/Langs.md", heading: "C# basics", text: "t", words: 80 };
+		const plan = { meta: { exam: "Final", course: "Langs", courseFolder: "Courses", date: "2026-11-12", startDate: "2026-11-08", minutesPerDay: 30, weakTopics: [] }, days: buildSchedule([t], "2026-11-08", "2026-11-12", 30), topics: [t] };
+		const parsed = parsePlanNote(renderPlanNote(plan));
+		expect(parsed.topics[0]).toMatchObject({ id: t.id, note: "Courses/Langs.md", heading: "C# basics" });
+		expect(parsed.days[0].items[0].topicId).toBe(t.id);
+	});
+
 	it("validates the request", () => {
 		expect(validateRequest({ courseFolder: "C", exam: "", examDate: "2026-12-01", startDate: "2026-11-08", minutesPerDay: 45 })).toMatch(/name/);
 		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "Dec 1", startDate: "2026-11-08", minutesPerDay: 45 })).toMatch(/YYYY-MM-DD/);
+		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-02-30", startDate: "2026-11-08", minutesPerDay: 45 })).toMatch(/real date/);
 		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-11-08", startDate: "2026-11-08", minutesPerDay: 45 })).toMatch(/after/);
 		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-12-01", startDate: "2026-11-08", minutesPerDay: 5 })).toMatch(/at least 10/);
 		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-12-01", startDate: "2026-11-08", minutesPerDay: 45 })).toBeNull();
+		// With today known: an exam that is over, or today, cannot be planned; a past start date can.
+		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-10-01", startDate: "2026-09-01", minutesPerDay: 45 }, "2026-11-07")).toMatch(/after today/);
+		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-11-07", startDate: "2026-11-01", minutesPerDay: 45 }, "2026-11-07")).toMatch(/after today/);
+		expect(validateRequest({ courseFolder: "C", exam: "X", examDate: "2026-11-08", startDate: "2026-11-01", minutesPerDay: 45 }, "2026-11-07")).toBeNull();
 	});
 });
 
@@ -139,6 +196,46 @@ describe("rebuildPlan", () => {
 		expect(rebuilt).toContain("## Topics\n\n- Isolation forests (2026-09-11)");
 		expect(rebuildPlan(rebuilt, "2026-11-10")).toBe(rebuilt);
 		expect(addWeakTopics(rebuilt, ["Gradient boosting (2026-09-18)"])).toBe(rebuilt);
+	});
+
+	it("gives topics answered wrong a larger share of the remaining plan and drops no topic", async () => {
+		const vault = lectureVault();
+		const { plan, content } = await createPlan(vault, { courseFolder: "Courses/CSCI 470", exam: "Midterm 2", examDate: "2026-11-22", startDate: "2026-11-08", minutesPerDay: 45 });
+		const todayDate = "2026-11-11";
+		// A quiz on the topics planned for the day before: Gradient boosting wrong, the rest right.
+		const items = itemsOn(plan, "2026-11-10");
+		const quizTopics = quizTopicsFor(items, plan.topics);
+		expect(quizTopics.length).toBeGreaterThan(0);
+		const questions = attachTopics(
+			quizTopics.map((t, i) => ({ question: `Explain ${t.title.replace(/\s*\(.*\)$/, "").toLowerCase()} (${i})?`, answer: "Because." })),
+			quizTopics,
+		);
+		const gb = plan.topics.find((t) => t.title.startsWith("Gradient boosting"))!;
+		const gbQuestion = attachTopics([{ question: "Explain gradient boosting in one line?", answer: "Residuals." }], [{ title: gb.title, text: gb.text, link: `[[${gb.note.replace(/\.md$/, "")}#${gb.heading}]]` }]);
+		const section = renderQuizSection("2026-11-10", [...questions, ...gbQuestion]);
+		const ticked = section.replace(/- \[ \] (Explain (?!gradient))/g, "- [x] $1");
+		const withQuiz = content + "\n" + ticked;
+		const results = latestQuiz(withQuiz);
+		expect(results.some((r) => !r.correct)).toBe(true);
+		const weak = weakTopicTitles(results, parsePlanNote(withQuiz).days.flatMap((d) => d.items));
+		expect(weak).toEqual([gb.title]);
+
+		const before = parsePlanNote(rebuildPlan(withQuiz, todayDate));
+		const after = parsePlanNote(rebuildPlan(addWeakTopics(withQuiz, weak), todayDate));
+		expect(after.meta.weakTopics).toEqual([gb.title]);
+		const futureMinutes = (p: Plan, id: string) => p.days.filter((d) => d.date >= todayDate).flatMap((d) => d.items).filter((i) => i.topicId === id).reduce((n, i) => n + i.minutes, 0);
+		const futureTotal = (p: Plan) => p.days.filter((d) => d.date >= todayDate).flatMap((d) => d.items).reduce((n, i) => n + i.minutes, 0);
+		expect(futureMinutes(after, gb.id)).toBeGreaterThan(futureMinutes(before, gb.id));
+		expect(futureMinutes(after, gb.id) / futureTotal(after)).toBeGreaterThan(futureMinutes(before, gb.id) / futureTotal(before));
+		// Weak topic first in the final mixed review.
+		expect(after.days[after.days.length - 2].items[0].topicId).toBe(gb.id);
+		// Every topic that still had work ahead keeps at least one item; nothing vanishes.
+		const futureIds = (p: Plan) => new Set(p.days.filter((d) => d.date >= todayDate).flatMap((d) => d.items).map((i) => i.topicId));
+		for (const id of futureIds(before)) expect(futureIds(after).has(id)).toBe(true);
+		for (const t of plan.topics) expect(after.days.flatMap((d) => d.items).some((i) => i.topicId === t.id)).toBe(true);
+		// Recording the same quiz again changes nothing more.
+		const again = rebuildPlan(addWeakTopics(rebuildPlan(addWeakTopics(withQuiz, weak), todayDate), weak), todayDate);
+		expect(again).toBe(rebuildPlan(addWeakTopics(withQuiz, weak), todayDate));
 	});
 
 	it("leaves a plan alone once the exam day has arrived", async () => {

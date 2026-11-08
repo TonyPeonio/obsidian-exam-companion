@@ -26,7 +26,7 @@ export class PlanModal extends Modal {
 		titleEl.setText("Plan an exam");
 		contentEl.createEl("p", {
 			cls: "exam-modal-help",
-			text: "Every ## section of the notes in the course folder becomes a topic. Each topic gets a first pass and a review a few days later; the last two days are mixed review. The plan is written as a checklist note you can edit.",
+			text: "Every ## section of the notes in the course folder becomes a topic (a Lecture Companion lecture note is one topic). Each topic gets a first pass and a review a few days later; the last two days are mixed review. The plan is written as a checklist note you can edit.",
 		});
 
 		const listId = "exam-companion-folders";
@@ -80,7 +80,7 @@ export class PlanModal extends Modal {
 					.setButtonText("Create plan")
 					.setCta()
 					.onClick(() => {
-						const problem = validateRequest(this.req);
+						const problem = validateRequest(this.req, today());
 						if (problem) {
 							this.errorEl?.setText(problem);
 							return;

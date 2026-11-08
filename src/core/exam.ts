@@ -19,10 +19,12 @@ export function courseNameFor(folder: string): string {
 	return trimmed.split("/").pop() || "Course";
 }
 
-export function validateRequest(r: ExamRequest): string | null {
+/** `todayDate` (YYYY-MM-DD), when given, rejects an exam that is today or already over. */
+export function validateRequest(r: ExamRequest, todayDate?: string): string | null {
 	if (!r.exam.trim()) return "Give the exam a name (e.g. Midterm 2).";
-	if (!isIsoDate(r.examDate)) return "The exam date must be YYYY-MM-DD.";
-	if (!isIsoDate(r.startDate)) return "The start date must be YYYY-MM-DD.";
+	if (!isIsoDate(r.examDate)) return "The exam date must be a real date, YYYY-MM-DD.";
+	if (!isIsoDate(r.startDate)) return "The start date must be a real date, YYYY-MM-DD.";
+	if (todayDate && r.examDate <= todayDate) return `The exam date must be after today (${todayDate}).`;
 	if (r.examDate <= r.startDate) return "The exam date must be after the start date.";
 	if (!Number.isFinite(r.minutesPerDay) || r.minutesPerDay < 10) return "Minutes per day must be at least 10.";
 	return null;
