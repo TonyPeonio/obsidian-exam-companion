@@ -28,12 +28,13 @@ export function quizSystemPrompt(count: number): string {
 	return [
 		"You write exam-practice questions for a student from the student's own notes.",
 		"Ask only what the given notes support; never invent facts, names or numbers that are not in them.",
-		"Prefer questions that make the student explain, compare, derive or compute over questions that only recall a term.",
-		"Mix difficulty. Each answer is complete in two to five sentences (or the worked result), with the key terms the notes use.",
+		"Use only the terms, methods, examples and numbers that appear in the notes. Do not bring in related methods, models, losses or techniques the notes do not name, not even as an aside or a comparison.",
+		"Prefer questions that make the student explain, compare, derive or compute over questions that only recall a term. Each question must be about a different point of the notes.",
+		"Mix difficulty. Each answer is complete in two to five sentences (or the worked result), with the key terms the notes use. When a question asks for a calculation, the answer gives the steps and the result once, without hedging.",
 		`Output exactly ${count} questions in this format and nothing else:`,
 		"Q: <question>",
 		"A: <answer>",
-		"Separate pairs with a blank line. Do not number them, do not add headings or commentary.",
+		"Separate pairs with a blank line. Do not number them, do not add headings, introductions or closing remarks.",
 	].join("\n");
 }
 
@@ -54,36 +55,109 @@ export function buildQuizUserMessage(topics: QuizTopic[], count: number, numCtx:
 	return { message: parts.join("\n").trimEnd(), truncated };
 }
 
-/** Parses `Q:`/`A:` pairs; tolerates numbering, bold markers, "Question:"/"Answer:" and think tags. */
-export function parseQuiz(text: string): { question: string; answer: string }[] {
-	const clean = text.replace(/<think>[\s\S]*?<\/think>/g, "");
+/** List numbering or bullet in front of a label: `1. `, `1) `, `(1) `, `#1 `, `- `, `* `. */
+const LIST_PREFIX = /^\s*(?:\(?\d+[.):]\)?\s+|#\d+\s+)?(?:[-*+]\s+)?/;
+const BOLD = "(?:\\*\\*|__)?";
+/** `Q:` / `Q1.` / `**Question 2:**` / `Question` alone on a line; group 1 is the text after the label. */
+const Q_LABEL = new RegExp(`^${BOLD}\\s*(?:Q|Question)\\s*#?\\d*\\s*${BOLD}\\s*(?:[:.)—–-]|$)\\s*${BOLD}\\s*(.*)$`, "i");
+const A_LABEL = new RegExp(`^${BOLD}\\s*(?:A|Answer)\\s*#?\\d*\\s*${BOLD}\\s*(?:[:.)—–-]|$)\\s*${BOLD}\\s*(.*)$`, "i");
+/** `A:` further along a line that started with `Q:` (both on one line). */
+const INLINE_A = new RegExp(`^(.*?\\S)\\s+${BOLD}(?:A|Answer)\\s*\\d*\\s*${BOLD}\\s*:\\s*${BOLD}\\s*(.+)$`, "i");
+/** A numbered question without a `Q` label: `3. Why does ...?` */
+const NUMBERED_QUESTION = /^\(?\d+[.)]\s+(.+\?)\s*$/;
+/** A closing remark after the last answer, once a blank line separates it. */
+const COMMENTARY = /^(?:these|those|the above|this set|i hope|let me know|note:|good luck|feel free|all (?:\d+|five|three|ten) questions|the questions|happy studying|each (?:question|answer))/i;
+const STRUCTURAL = /^(?:#{1,6}\s|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
+
+function stripBold(s: string): string {
+	return s.replace(/^(?:\*\*|__)\s*/, "").replace(/\s*(?:\*\*|__)$/, "").trim();
+}
+
+/**
+ * Parses `Q:`/`A:` pairs from a model reply. Tolerates numbering (`1.`, `1)`, `(1)`, `#1`,
+ * bullets), bold labels, "Question"/"Answer", `Q1.`/`Q1)`, a label alone on its line, Q and A
+ * on one line, numbered questions without a label, think tags, headings or rules between
+ * pairs, and closing commentary. Code fences inside answers are kept verbatim (no `**`
+ * stripping, blank lines kept); list numbering inside answers is kept. Models sometimes write
+ * one more pair than asked; `max` keeps the first ones.
+ */
+export function parseQuiz(text: string, max = Infinity): { question: string; answer: string }[] {
+	const clean = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "");
 	const out: { question: string; answer: string }[] = [];
-	let current: { question: string; answer: string } | null = null;
-	let mode: "q" | "a" | null = null;
+	const st: { cur: { question: string; answer: string } | null; mode: "q" | "a" | null } = { cur: null, mode: null };
+	let inFence = false;
+	let paragraphBreak = false;
+	const finish = () => {
+		if (st.cur?.question) out.push(st.cur);
+		st.cur = null;
+	};
+	const startQuestion = (q: string) => {
+		finish();
+		const inline = INLINE_A.exec(q);
+		if (inline) {
+			st.cur = { question: stripBold(inline[1]), answer: stripBold(inline[2]) };
+			st.mode = "a";
+		} else {
+			st.cur = { question: stripBold(q), answer: "" };
+			st.mode = "q";
+		}
+		paragraphBreak = false;
+	};
 	for (const raw of clean.split(/\r?\n/)) {
-		const line = raw
-			.replace(/\*\*/g, "")
-			.replace(/^\s*(?:\d+[.)]\s+)?(?:[-*]\s+)?/, "")
-			.trim();
-		const q = /^(?:Q|Question)\s*\d*\s*[:.)]\s*(.*)$/i.exec(line);
-		const a = /^(?:A|Answer)\s*\d*\s*[:.)]\s*(.*)$/i.exec(line);
+		const trimmed = raw.trim();
+		if (/^(```|~~~)/.test(trimmed)) {
+			inFence = !inFence;
+			if (st.cur && st.mode === "a") st.cur.answer += (st.cur.answer ? "\n" : "") + trimmed;
+			continue;
+		}
+		if (inFence) {
+			if (st.cur && st.mode === "a") st.cur.answer += "\n" + raw.replace(/\s+$/, "");
+			continue;
+		}
+		const line = trimmed.replace(LIST_PREFIX, "");
+		const q = Q_LABEL.exec(line);
 		if (q) {
-			if (current?.question) out.push(current);
-			current = { question: q[1].trim(), answer: "" };
-			mode = "q";
+			startQuestion(q[1]);
 			continue;
 		}
-		if (a && current) {
-			current.answer = a[1].trim();
-			mode = "a";
+		const a = A_LABEL.exec(line);
+		if (a && st.cur) {
+			st.cur.answer = stripBold(a[1]);
+			st.mode = "a";
+			paragraphBreak = false;
 			continue;
 		}
-		if (!line) continue;
-		if (mode === "q" && current) current.question += (current.question ? " " : "") + line;
-		else if (mode === "a" && current) current.answer += (current.answer ? "\n" : "") + line;
+		if (!trimmed) {
+			paragraphBreak = true;
+			continue;
+		}
+		if (STRUCTURAL.test(trimmed)) {
+			// A heading or rule between pairs: nothing after it continues the previous answer.
+			if (st.mode === "a") finish();
+			st.mode = null;
+			continue;
+		}
+		const numbered = NUMBERED_QUESTION.exec(trimmed);
+		if (numbered && (st.mode === null || (st.mode === "a" && st.cur?.answer))) {
+			startQuestion(numbered[1]);
+			continue;
+		}
+		if (st.mode === "q" && st.cur) st.cur.question += (st.cur.question ? " " : "") + trimmed;
+		else if (st.mode === "a" && st.cur) {
+			if (paragraphBreak && COMMENTARY.test(trimmed)) {
+				finish();
+				st.mode = null;
+				continue;
+			}
+			st.cur.answer += (st.cur.answer ? "\n" : "") + trimmed;
+		}
+		paragraphBreak = false;
 	}
-	if (current?.question) out.push(current);
-	return out.filter((p) => p.question && p.answer).map((p) => ({ question: p.question.trim(), answer: p.answer.trim() }));
+	finish();
+	return out
+		.filter((p) => p.question && p.answer)
+		.map((p) => ({ question: p.question.trim(), answer: p.answer.trim() }))
+		.slice(0, Math.max(0, max));
 }
 
 /** Assigns questions to topics round-robin when the model did not say which topic each belongs to. */

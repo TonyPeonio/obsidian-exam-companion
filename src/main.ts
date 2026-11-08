@@ -109,7 +109,7 @@ export default class ExamCompanionPlugin extends Plugin {
 				keep_alive: "10m",
 				think: this.settings.thinking ? true : false,
 			});
-			const pairs = parseQuiz(reply);
+			const pairs = parseQuiz(reply, this.settings.questionsPerQuiz);
 			if (pairs.length === 0) throw new Error("The model's reply had no Q:/A: pairs. Try again or pick a larger model.");
 			const questions = attachTopics(pairs, quizTopics);
 			const section = renderQuizSection(date, questions);

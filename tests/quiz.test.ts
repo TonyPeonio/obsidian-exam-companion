@@ -22,6 +22,75 @@ describe("parseQuiz", () => {
 	it("drops pairs without an answer", () => {
 		expect(parseQuiz("Q: Lonely question\n\nQ: Full\nA: yes")).toEqual([{ question: "Full", answer: "yes" }]);
 		expect(parseQuiz("no questions here")).toEqual([]);
+		expect(parseQuiz("<think>still thinking Q: not real\nA: not real")).toEqual([]);
+	});
+
+	it("keeps only the first `max` pairs when the model writes too many", () => {
+		const six = Array.from({ length: 6 }, (_, i) => `Q: Question ${i + 1}?\nA: Answer ${i + 1}.`).join("\n\n");
+		expect(parseQuiz(six)).toHaveLength(6);
+		expect(parseQuiz(six, 5).map((p) => p.question)).toEqual(["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]);
+		expect(parseQuiz("Q: Only one?\nA: Yes.", 5)).toHaveLength(1);
+	});
+
+	it("reads Q and A on one line", () => {
+		expect(parseQuiz("Q: What is X? A: It is Y.\n\nQ: Why Z? A: Because W.")).toEqual([
+			{ question: "What is X?", answer: "It is Y." },
+			{ question: "Why Z?", answer: "Because W." },
+		]);
+		expect(parseQuiz("**Q:** What is X? **Answer:** It is Y.")).toEqual([{ question: "What is X?", answer: "It is Y." }]);
+	});
+
+	it("accepts every numbering and label style", () => {
+		expect(parseQuiz("(1) Q: Explain A.\n(1) A: Because B.\n\n(2) Q: Explain C.\n(2) A: Because D.")).toEqual([
+			{ question: "Explain A.", answer: "Because B." },
+			{ question: "Explain C.", answer: "Because D." },
+		]);
+		expect(parseQuiz("#1 Q: Explain A.\nA: B.\n#2 Q: Explain C.\nA: D.")).toEqual([
+			{ question: "Explain A.", answer: "B." },
+			{ question: "Explain C.", answer: "D." },
+		]);
+		expect(parseQuiz("Q1. Explain A\nA1. Because B\n\nQ2) Explain C\nA2) Because D")).toEqual([
+			{ question: "Explain A", answer: "Because B" },
+			{ question: "Explain C", answer: "Because D" },
+		]);
+		expect(parseQuiz("Q1 — Explain A\nA1 — Because B")).toEqual([{ question: "Explain A", answer: "Because B" }]);
+		// Bold around the label, around label and colon, or around the whole line.
+		expect(parseQuiz("**Q1**: Explain A.\n**A1**: Because B.\n\n**Question 2:** Compare C.\n**Answer 2:** D wins.\n\n**Q: Explain E.**\n**A: Because F.**")).toEqual([
+			{ question: "Explain A.", answer: "Because B." },
+			{ question: "Compare C.", answer: "D wins." },
+			{ question: "Explain E.", answer: "Because F." },
+		]);
+		// A label alone on its line, text on the next.
+		expect(parseQuiz("**Question 1**\nExplain A.\n**Answer**\nBecause B.")).toEqual([{ question: "Explain A.", answer: "Because B." }]);
+		// Numbered questions with no Q label at all.
+		expect(parseQuiz("1. Why are anomalies isolated quickly?\nA: Sparse regions.\n2. What does c(n) do?\nAnswer: Normalises.")).toEqual([
+			{ question: "Why are anomalies isolated quickly?", answer: "Sparse regions." },
+			{ question: "What does c(n) do?", answer: "Normalises." },
+		]);
+	});
+
+	it("ignores preamble, headings, rules and closing commentary", () => {
+		expect(parseQuiz("Here are your questions:\n\n## Isolation forests\n\nQ: Explain A.\nA: Because B.\n\n## Gradient boosting\n\nQ: Explain C.\nA: Because D.\n\n---\nNote: all questions come from the notes.")).toEqual([
+			{ question: "Explain A.", answer: "Because B." },
+			{ question: "Explain C.", answer: "Because D." },
+		]);
+		expect(parseQuiz("Q: Explain A.\nA: Because B.\n\nThese questions cover both topics. Good luck!")).toEqual([{ question: "Explain A.", answer: "Because B." }]);
+		expect(parseQuiz("Q: Explain A.\nA: Because B.\n\nLet me know if you want more.")).toEqual([{ question: "Explain A.", answer: "Because B." }]);
+		// A second paragraph of a real answer is kept.
+		expect(parseQuiz("Q: Explain A.\nA: Because B.\n\nAlso because C.")).toEqual([{ question: "Explain A.", answer: "Because B.\nAlso because C." }]);
+	});
+
+	it("keeps code, ** and list numbering inside answers verbatim", () => {
+		expect(parseQuiz("Q: Write the update.\nA: In NumPy:\n```python\nW = W - lr * d  # 2**3\n\nprint(W)\n```\nThat is it.")).toEqual([
+			{ question: "Write the update.", answer: "In NumPy:\n```python\nW = W - lr * d  # 2**3\n\nprint(W)\n```\nThat is it." },
+		]);
+		expect(parseQuiz("Q: What does `2**3` give?\nA: 8, since ** is the power operator.")).toEqual([{ question: "What does `2**3` give?", answer: "8, since ** is the power operator." }]);
+		expect(parseQuiz("Q: List the steps.\nA: Two steps:\n1. Pick a feature.\n2. Split at random.\n\nQ: Why?\nA: Because.")).toEqual([
+			{ question: "List the steps.", answer: "Two steps:\n1. Pick a feature.\n2. Split at random." },
+			{ question: "Why?", answer: "Because." },
+		]);
+		// A `Q:` inside a code fence is code, not a new question.
+		expect(parseQuiz("Q: Show the format.\nA: Like this:\n```\nQ: sample\nA: sample\n```")).toEqual([{ question: "Show the format.", answer: "Like this:\n```\nQ: sample\nA: sample\n```" }]);
 	});
 });
 
