@@ -103,10 +103,6 @@ export class OllamaClient {
 		return text;
 	}
 
-	private postJson(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-		return this.json("POST", path, JSON.stringify(body));
-	}
-
 	/** /api/version and /api/tags accept GET only; a POST gets "405 method not allowed". */
 	private getJson(path: string): Promise<Record<string, unknown>> {
 		return this.json("GET", path, undefined);
