@@ -1,7 +1,9 @@
 /**
  * Topics are what a study plan schedules: one per `## heading` section of each note in the
- * course folder (Lecture Companion writes one `## YYYY-MM-DD` section per class, with a
- * `### Summary` under it), or the whole note when it has no `##` headings.
+ * course folder, or the whole note when it has no `##` headings or when it is a Lecture
+ * Companion lecture note (`## Slides`, `## Summary`, `## Transcript`, `## My notes` are the
+ * note's structure, not topics; the Summary is the quiz text). Lecture Companion's other layout,
+ * one `## YYYY-MM-DD` section per class with a `### Summary` under it, is one topic per section.
  */
 
 export interface Topic {
@@ -35,11 +37,21 @@ export function countWords(text: string): number {
 	return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
-function stripFrontmatter(content: string): { body: string; date?: string } {
+function stripFrontmatter(content: string): { body: string; date?: string; title?: string } {
 	const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
 	if (!m) return { body: content };
 	const date = /^date:\s*"?(\d{4}-\d{2}-\d{2})"?/m.exec(m[1])?.[1];
-	return { body: content.slice(m[0].length), date };
+	const rawTitle = /^title:\s*(.+)$/m.exec(m[1])?.[1]?.trim();
+	const title = rawTitle ? rawTitle.replace(/^(["'])(.*)\1$/, "$2").replace(/\\"/g, '"').trim() || undefined : undefined;
+	return { body: content.slice(m[0].length), date, title };
+}
+
+/** Lecture Companion's per-lecture layout: the `##` sections are Slides/Summary/Transcript/My notes. */
+const LECTURE_SECTIONS = new Set(["slides", "summary", "transcript", "my notes"]);
+
+function isLectureNote(level2: Section[]): boolean {
+	const names = level2.map((s) => s.heading.toLowerCase());
+	return names.includes("summary") && names.some((n) => n !== "summary" && LECTURE_SECTIONS.has(n));
 }
 
 interface Section {
@@ -78,12 +90,25 @@ export function topicLink(t: Pick<Topic, "note" | "heading">): string {
 export function extractTopics(notes: NoteContent[]): Topic[] {
 	const topics: Topic[] = [];
 	for (const note of notes) {
-		const { body, date: fmDate } = stripFrontmatter(note.content);
+		const { body, date: fmDate, title: fmTitle } = stripFrontmatter(note.content);
 		const lines = body.split("\n");
 		const all = sections(lines);
 		const level2 = all.filter((s) => s.level === 2);
 		const name = basename(note.path);
 		const noteDate = fmDate ?? DATE_RE.exec(name)?.[1];
+		if (isLectureNote(level2)) {
+			// One topic per lecture: the Summary is the quiz text, the whole note the weight.
+			const words = countWords(lines.filter((l) => !/^#{1,2}\s/.test(l)).join("\n"));
+			if (words === 0) continue;
+			const summary = level2.find((s) => s.heading.toLowerCase() === "summary")!;
+			const summaryText = lines.slice(summary.start + 1, summary.end).join("\n").trim();
+			const rest = lines.filter((l, i) => !/^##\s/.test(l) && (i <= summary.start || i >= summary.end)).join("\n").trim();
+			const text = summaryText && !/^_No summary yet\._$/.test(summaryText) ? summaryText : rest;
+			if (!countWords(text)) continue;
+			const title = fmTitle ? (noteDate && !fmTitle.includes(noteDate) ? `${fmTitle} (${noteDate})` : fmTitle) : name;
+			topics.push({ id: note.path, title, note: note.path, text, words, date: noteDate });
+			continue;
+		}
 		if (level2.length === 0) {
 			const text = lines
 				.filter((l) => !/^#\s/.test(l))

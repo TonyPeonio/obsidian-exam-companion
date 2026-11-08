@@ -37,6 +37,31 @@ describe("extractTopics", () => {
 		expect(topics[1].date).toBe("2026-09-01");
 	});
 
+	it("treats a Lecture Companion lecture note (Slides/Summary/Transcript/My notes) as one topic", () => {
+		const note = (date: string, title: string | null, summary: string) =>
+			`---\ncourse: "CSCI 470"\ndate: ${date}\ntags:\n  - lecture\n${title ? `title: "${title}"\n` : ""}---\n\n## Slides\n\n_No slides yet._\n\n## Summary\n\n${summary}\n\n## Transcript\n\n**[00:00]** ${"spoken word ".repeat(40)}\n\n**[01:10]** more speech here\n\n## My notes\n\n- ask about the exam\n`;
+		const topics = extractTopics([
+			{ path: "Courses/CSCI 470/2026-09-11.md", content: note("2026-09-11", "Isolation forests", "### In one sentence\nHow random splits isolate anomalies. [01:10]\n\n### Questions to review\n- Why are anomalies isolated quickly?") },
+			{ path: "Courses/CSCI 470/2026-09-18.md", content: note("2026-09-18", null, "### Key points\n- Boosting adds trees one at a time. [02:05]") },
+			{ path: "Courses/CSCI 470/2026-09-25.md", content: note("2026-09-25", "Empty lecture", "_No summary yet._") },
+		]);
+		expect(topics.map((t) => [t.id, t.title, t.heading])).toEqual([
+			["Courses/CSCI 470/2026-09-11.md", "Isolation forests (2026-09-11)", undefined],
+			["Courses/CSCI 470/2026-09-18.md", "2026-09-18", undefined],
+			["Courses/CSCI 470/2026-09-25.md", "Empty lecture (2026-09-25)", undefined],
+		]);
+		// Quiz text is the Summary only; the weight counts the whole note.
+		expect(topics[0].text).toBe("### In one sentence\nHow random splits isolate anomalies. [01:10]\n\n### Questions to review\n- Why are anomalies isolated quickly?");
+		expect(topics[0].text).not.toContain("spoken word");
+		expect(topics[0].words).toBeGreaterThan(80);
+		expect(topics[0].date).toBe("2026-09-11");
+		expect(topicLink(topics[0])).toBe("[[Courses/CSCI 470/2026-09-11]]");
+		// No summary yet: the transcript and notes stand in as quiz text.
+		expect(topics[2].text).toContain("spoken word");
+		expect(topics[2].text).toContain("ask about the exam");
+		expect(topics[2].text).not.toContain("_No summary yet._");
+	});
+
 	it("ignores headings inside code fences and counts words sensibly", () => {
 		const topics = extractTopics([{ path: "C/Code.md", content: "## Real\n\n```\n## not a heading\n```\n\nfour real words here\n" }]);
 		expect(topics).toHaveLength(1);
