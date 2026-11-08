@@ -36,7 +36,8 @@ export class OllamaError extends Error {
 	}
 }
 
-export type FallbackPost = (url: string, body: string) => Promise<{ status: number; text: string }>;
+/** Non-streaming transport used when `fetch` is blocked; `body` is undefined for GET. */
+export type FallbackPost = (url: string, body: string | undefined, method: "GET" | "POST") => Promise<{ status: number; text: string }>;
 type FetchLike = typeof fetch;
 
 export class OllamaClient {
@@ -51,12 +52,12 @@ export class OllamaClient {
 	}
 
 	async version(): Promise<string> {
-		const res = await this.postJson("/api/version", {});
+		const res = await this.getJson("/api/version");
 		return typeof res.version === "string" ? res.version : "unknown";
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
-		const res = await this.postJson("/api/tags", {});
+		const res = await this.getJson("/api/tags");
 		const models = Array.isArray(res.models) ? (res.models as Record<string, unknown>[]) : [];
 		return models.map((m) => ({
 			name: String(m.name),
@@ -78,7 +79,7 @@ export class OllamaClient {
 			if (req.signal?.aborted) throw err;
 			if (this.fallbackPost) {
 				body.stream = false;
-				const r = await this.fallbackPost(url, JSON.stringify(body));
+				const r = await this.fallbackPost(url, JSON.stringify(body), "POST");
 				if (r.status >= 400) throw new OllamaError(extractError(r.text, r.status), r.status);
 				const json = JSON.parse(r.text) as Record<string, unknown>;
 				const raw = ((json.message ?? {}) as Record<string, unknown>).content;
@@ -102,17 +103,25 @@ export class OllamaClient {
 		return text;
 	}
 
-	private async postJson(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+	private postJson(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+		return this.json("POST", path, JSON.stringify(body));
+	}
+
+	/** /api/version and /api/tags accept GET only; a POST gets "405 method not allowed". */
+	private getJson(path: string): Promise<Record<string, unknown>> {
+		return this.json("GET", path, undefined);
+	}
+
+	private async json(method: "GET" | "POST", path: string, payload: string | undefined): Promise<Record<string, unknown>> {
 		const url = `${this.baseUrl}${path}`;
-		const payload = JSON.stringify(body);
 		try {
-			const res = await this.fetchImpl(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+			const res = await this.fetchImpl(url, payload === undefined ? { method } : { method, headers: { "Content-Type": "application/json" }, body: payload });
 			if (!res.ok) throw new OllamaError(extractError(await res.text(), res.status), res.status);
 			return (await res.json()) as Record<string, unknown>;
 		} catch (err) {
 			if (err instanceof OllamaError) throw err;
 			if (this.fallbackPost) {
-				const r = await this.fallbackPost(url, payload);
+				const r = await this.fallbackPost(url, payload, method);
 				if (r.status >= 400) throw new OllamaError(extractError(r.text, r.status), r.status);
 				return JSON.parse(r.text) as Record<string, unknown>;
 			}

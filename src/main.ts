@@ -21,8 +21,8 @@ export default class ExamCompanionPlugin extends Plugin {
 		this.client = new OllamaClient(
 			() => this.settings.ollamaUrl,
 			(...args) => fetch(...args),
-			async (url, body) => {
-				const res = await requestUrl({ url, method: "POST", contentType: "application/json", body, throw: false });
+			async (url, body, method) => {
+				const res = await requestUrl(method === "GET" ? { url, method, throw: false } : { url, method, contentType: "application/json", body, throw: false });
 				return { status: res.status, text: res.text };
 			},
 		);

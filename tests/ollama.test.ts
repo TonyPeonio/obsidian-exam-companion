@@ -25,10 +25,15 @@ describe("OllamaClient", () => {
 					body = String(init?.body);
 					return new Response(streamOf([{ message: { content: "Q: a" } }, { message: { content: "\nA: b" } }, { done: true }]));
 				}
-				if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "qwen3.5:9b", size: 1, capabilities: ["tools"] }] }));
+				// Ollama answers POST to /api/tags and /api/version with 405, so those must be GET.
+				if (url.endsWith("/api/tags") || url.endsWith("/api/version")) {
+					if (init?.method !== "GET" || init.body !== undefined) return new Response("405 method not allowed", { status: 405 });
+					return new Response(url.endsWith("/api/tags") ? JSON.stringify({ models: [{ name: "qwen3.5:9b", size: 1, capabilities: ["tools"] }] }) : JSON.stringify({ version: "0.40.15" }));
+				}
 				return new Response("{}", { status: 404 });
 			}),
 		);
+		expect(await client.version()).toBe("0.40.15");
 		const deltas: string[] = [];
 		const text = await client.chat({ model: "m", messages: [{ role: "user", content: "hi" }], think: false, options: { num_ctx: 8192 }, onDelta: (d) => deltas.push(d) });
 		expect(text).toBe("Q: a\nA: b");
