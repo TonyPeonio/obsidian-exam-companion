@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createPlan } from "../src/core/exam";
 import { itemsOn, parsePlanNote } from "../src/core/planner";
-import { attachTopics, buildQuizUserMessage, flashcards, latestQuiz, mergeFlashcards, parseQuiz, parseQuizSections, quizSystemPrompt, quizTopicsFor, renderQuizSection, weakTopicTitles } from "../src/core/quiz";
+import { attachTopics, buildQuizUserMessage, flashcards, flashcardsHeader, latestQuiz, mergeFlashcards, parseQuiz, parseQuizSections, quizSystemPrompt, quizTopicsFor, renderQuizSection, weakTopicTitles } from "../src/core/quiz";
 import { lectureVault } from "./fakes";
 
 describe("parseQuiz", () => {
@@ -152,6 +152,30 @@ describe("quiz section", () => {
 		const merged = mergeFlashcards("Explain isolation forests.::old answer\n", cards);
 		expect(merged).toBe("Explain isolation forests.::old answer\n\nWhat does boosting optimise?::The residuals.\n");
 		expect(mergeFlashcards(merged, cards)).toBe(merged);
+	});
+
+	it("writes single-line cards Spaced Repetition reads: tag header, one card per line, :: escaped, re-export adds nothing", () => {
+		const header = flashcardsHeader("flashcards", "CSCI 470");
+		expect(header).toBe("#flashcards/CSCI-470");
+		expect(flashcardsHeader("#decks/", "Maths: Part 2!")).toBe("#decks/Maths-Part-2");
+		expect(flashcardsHeader("", "")).toBe("#flashcards");
+		const cards = flashcards(renderQuizSection("2026-11-08", questions) + "\n" + renderQuizSection("2026-11-09", [questions[0]]));
+		const fresh = mergeFlashcards("", cards, header);
+		expect(fresh).toBe("#flashcards/CSCI-470\n\nExplain isolation forests.::Random splits isolate anomalies<br>faster.\n\nWhat does boosting optimise?::The residuals.\n");
+		// Every card is one line with exactly one `::`, and no blank line is inside a card.
+		const cardLines = fresh.split("\n").filter((l) => l.includes("::"));
+		expect(cardLines).toHaveLength(2);
+		for (const l of cardLines) expect(l.split("::")).toHaveLength(2);
+		// Spaced Repetition has reviewed the first card (scheduling comment on the next line, its default):
+		const reviewed = fresh.replace("faster.\n", "faster.\n<!--SR:!2026-11-12,4,270-->\n");
+		expect(mergeFlashcards(reviewed, cards, header)).toBe(reviewed);
+		// A later quiz adds one card; existing cards and their scheduling survive, the header is not repeated.
+		const later = flashcards(renderQuizSection("2026-11-10", attachTopics([{ question: "What is `std::vector`?", answer: "A sequence::container." }], [])));
+		expect(later).toEqual(["What is `std&#58;:vector`?::A sequence&#58;:container."]);
+		const grown = mergeFlashcards(reviewed, [...cards, ...later], header);
+		expect(grown).toBe(reviewed.trimEnd() + "\n\nWhat is `std&#58;:vector`?::A sequence&#58;:container.\n");
+		expect(grown.match(/#flashcards/g)).toHaveLength(1);
+		expect(mergeFlashcards(grown, [...cards, ...later], header)).toBe(grown);
 	});
 
 	it("builds today's quiz topics from the plan items with the topics' text", async () => {

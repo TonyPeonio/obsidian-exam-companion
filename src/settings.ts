@@ -8,6 +8,8 @@ export interface ExamCompanionSettings {
 	questionsPerQuiz: number;
 	examsFolder: string;
 	flashcardsFolder: string;
+	/** Tag the Spaced Repetition plugin looks for; a new flashcards note starts with `#<tag>/<Course>`. */
+	flashcardsTag: string;
 	minutesPerDay: number;
 	lastCourseFolder: string;
 }
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: ExamCompanionSettings = {
 	questionsPerQuiz: 5,
 	examsFolder: "Exams",
 	flashcardsFolder: "Flashcards",
+	flashcardsTag: "flashcards",
 	minutesPerDay: 45,
 	lastCourseFolder: "",
 };

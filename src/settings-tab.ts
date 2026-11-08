@@ -134,5 +134,15 @@ export class ExamCompanionSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}),
 			);
+
+		new Setting(containerEl)
+			.setName("Flashcards tag")
+			.setDesc("A new flashcards note starts with #<tag>/<Course> so Spaced Repetition picks it up as a deck. Match the tag in that plugin's settings (default: flashcards).")
+			.addText((t) =>
+				t.setPlaceholder(DEFAULT_SETTINGS.flashcardsTag).setValue(s.flashcardsTag).onChange(async (v) => {
+					s.flashcardsTag = v.trim().replace(/^#+/, "") || DEFAULT_SETTINGS.flashcardsTag;
+					await this.plugin.saveSettings();
+				}),
+			);
 	}
 }

@@ -3,7 +3,7 @@ import { today } from "./core/dates";
 import { createPlan, loadTopics } from "./core/exam";
 import { OllamaClient, explainOllamaError } from "./core/ollama";
 import { PlanError, addWeakTopics, itemsOn, parsePlanNote, rebuildPlan, type Plan } from "./core/planner";
-import { attachTopics, buildQuizUserMessage, flashcards, latestQuiz, mergeFlashcards, parseQuiz, quizSystemPrompt, quizTopicsFor, renderQuizSection, weakTopicTitles } from "./core/quiz";
+import { attachTopics, buildQuizUserMessage, flashcards, flashcardsHeader, latestQuiz, mergeFlashcards, parseQuiz, quizSystemPrompt, quizTopicsFor, renderQuizSection, weakTopicTitles } from "./core/quiz";
 import { writeNote } from "./core/vault";
 import { ObsidianVault } from "./obsidian-vault";
 import { PlanModal } from "./plan-modal";
@@ -164,7 +164,7 @@ export default class ExamCompanionPlugin extends Plugin {
 		}
 		const path = normalizePath(`${this.settings.flashcardsFolder}/${plan.meta.course.replace(/[\\/:*?"<>|#^[\]]/g, "")}.md`);
 		const existing = this.vault.exists(path) ? await this.vault.read(path) : "";
-		const merged = mergeFlashcards(existing, cards);
+		const merged = mergeFlashcards(existing, cards, flashcardsHeader(this.settings.flashcardsTag, plan.meta.course));
 		if (merged === existing) {
 			new Notice("Flashcards are already up to date.");
 			return;

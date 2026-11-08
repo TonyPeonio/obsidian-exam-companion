@@ -236,7 +236,11 @@ export function weakTopicTitles(results: QuizResult[], items: PlanItem[]): strin
 	return Array.from(titles);
 }
 
-/** `Question::Answer` lines (the Spaced Repetition plugin's single-line format), deduplicated. */
+/**
+ * `Question::Answer` lines (the Spaced Repetition plugin's single-line basic card: one card
+ * per line, `::` between the sides), deduplicated by question. A `::` inside the text would be
+ * read as the separator, so it is written as `&#58;:`, which renders the same.
+ */
 export function flashcards(content: string): string[] {
 	const seen = new Set<string>();
 	const out: string[] = [];
@@ -245,22 +249,38 @@ export function flashcards(content: string): string[] {
 		if (seen.has(key) || !r.answer) continue;
 		seen.add(key);
 		const answer = r.answer.split("\n").join("<br>");
-		out.push(`${r.question}::${answer}`);
+		out.push(`${r.question.replace(/::/g, "&#58;:")}::${answer.replace(/::/g, "&#58;:")}`);
 	}
 	return out;
 }
 
-/** Merges new cards into an existing flashcards note without duplicating questions. */
-export function mergeFlashcards(existing: string, cards: string[]): string {
+/** `#flashcards/CSCI-470`: the tag Spaced Repetition scans for, with the course as the deck. */
+export function flashcardsHeader(tag: string, course: string): string {
+	const base = tag.trim().replace(/^#+/, "").replace(/\/+$/, "") || "flashcards";
+	const deck = course
+		.trim()
+		.replace(/\s+/g, "-")
+		.replace(/[^\p{L}\p{N}_/-]/gu, "")
+		.replace(/^[-/]+|[-/]+$/g, "");
+	return `#${base}${deck ? `/${deck}` : ""}`;
+}
+
+/**
+ * Merges new cards into an existing flashcards note without duplicating questions. A new
+ * note starts with `header` (the tag line) when one is given. Lines that are not cards, such
+ * as Spaced Repetition's `<!--SR:...-->` scheduling comments under reviewed cards, are kept.
+ */
+export function mergeFlashcards(existing: string, cards: string[], header = ""): string {
 	const have = new Set(
 		existing
 			.split("\n")
+			.filter((l) => l.includes("::"))
 			.map((l) => l.split("::")[0].trim().toLowerCase())
 			.filter(Boolean),
 	);
 	const add = cards.filter((c) => !have.has(c.split("::")[0].trim().toLowerCase()));
 	if (add.length === 0) return existing;
-	const base = existing.trimEnd();
+	const base = existing.trimEnd() || header.trim();
 	return (base ? base + "\n\n" : "") + add.join("\n\n") + "\n";
 }
 
