@@ -58,6 +58,14 @@ describe("OllamaClient", () => {
 			}),
 		);
 		await expect(down.chat({ model: "m", messages: [] })).rejects.toThrow(/Cannot reach Ollama/);
+		// Node's fetch says only "fetch failed"; the reason is in `cause`.
+		const reset = new OllamaClient(
+			() => "http://x",
+			fakeFetch(() => {
+				throw new TypeError("fetch failed", { cause: { code: "ECONNRESET", message: "read ECONNRESET" } });
+			}),
+		);
+		await expect(reset.chat({ model: "m", messages: [] })).rejects.toThrow(/fetch failed: ECONNRESET/);
 		expect(explainOllamaError(new Error('model "qwen3.5:9b" not found, try pulling it first'), "qwen3.5:9b", "http://x")).toMatch(/ollama pull qwen3.5:9b/);
 		expect(explainOllamaError(new Error("Cannot reach Ollama at http://x"), "m", "http://x")).toMatch(/Start Ollama/);
 	});

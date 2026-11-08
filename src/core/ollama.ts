@@ -87,7 +87,7 @@ export class OllamaClient {
 				req.onDelta?.(content);
 				return content;
 			}
-			throw new OllamaError(`Cannot reach Ollama at ${this.baseUrl}. Is it running? (${(err as Error).message})`);
+			throw new OllamaError(`Cannot reach Ollama at ${this.baseUrl}. Is it running? (${describe(err)})`);
 		}
 		if (!response.ok) throw new OllamaError(extractError(await response.text(), response.status), response.status);
 		if (!response.body) throw new OllamaError("Ollama returned an empty response body");
@@ -121,9 +121,16 @@ export class OllamaClient {
 				if (r.status >= 400) throw new OllamaError(extractError(r.text, r.status), r.status);
 				return JSON.parse(r.text) as Record<string, unknown>;
 			}
-			throw new OllamaError(`Cannot reach Ollama at ${this.baseUrl}. Is it running? (${(err as Error).message})`);
+			throw new OllamaError(`Cannot reach Ollama at ${this.baseUrl}. Is it running? (${describe(err)})`);
 		}
 	}
+}
+
+/** `fetch failed` alone says nothing; Node and Electron put the reason in `cause`. */
+function describe(err: unknown): string {
+	const e = err as { message?: string; cause?: { message?: string; code?: string } };
+	const cause = e.cause?.code ?? e.cause?.message;
+	return cause ? `${e.message ?? String(err)}: ${cause}` : (e.message ?? String(err));
 }
 
 function extractError(text: string, status: number): string {
